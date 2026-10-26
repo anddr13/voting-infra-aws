@@ -1,42 +1,18 @@
 name: terraform
 
+# Checks only. Unlike the Azure and GCP stacks, apply/destroy run from the laptop (`make up` / `make down`):
+# this AWS account lives in an AWS-managed organization whose SCP denies creating the IAM OIDC provider
+# GitHub Actions would need, and storing long-lived AWS keys in GitHub was ruled out.
 on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      action:
-        description: "apply = create or update the environment, destroy = delete it"
-        type: choice
-        options: [apply, destroy]
-        default: apply
-  schedule:
-    # Safety net for a pay-per-hour sandbox: whatever is still running at night is destroyed.
-    # Off the top of the hour, because GitHub delays (and may drop) scheduled runs there: on 2026-10-26
-    # a "0 1 * * *" run started at 05:42. The second run catches a dropped or very late first one and
-    # finishes in about a minute when nothing is left.
-    - cron: "23 1 * * *"
-    - cron: "53 3 * * *"
 
 permissions:
   contents: read
-  id-token: write # OIDC: short-lived AWS credentials, no keys stored in GitHub
-
-concurrency:
-  group: terraform
-  cancel-in-progress: false
-
-env:
-  AWS_REGION: eu-central-1
-  TF_VAR_region: eu-central-1
-  TF_VAR_admin_principal_arns: ${{ vars.EKS_ADMIN_ARNS || '[]' }}
-  TF_IN_AUTOMATION: "true"
-  TF_INPUT: "false"
 
 jobs:
   check:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -50,56 +26,5 @@ jobs:
           done
       - uses: terraform-linters/setup-tflint@v6
       - run: tflint --init && tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
-
-  apply:
-    if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - uses: actions/checkout@v7
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-      - run: terraform init -backend-config=backend.hcl
-      - run: terraform apply -auto-approve
-      - name: Wait for the app
-        run: |
-          cluster=$(terraform output -raw cluster_name)
-          aws eks update-kubeconfig --name "$cluster" --region "$AWS_REGION"
-          bash ../scripts/wait-for-app.sh "$cluster"
-
-  destroy:
-    # The nightly run is skipped until bootstrap has set the repository variables.
-    if: (github.event_name == 'schedule' && vars.AWS_ROLE_ARN != '') || (github.event_name == 'workflow_dispatch' && inputs.action == 'destroy')
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - uses: actions/checkout@v7
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-      - run: terraform init -backend-config=backend.hcl
-      - name: Remove load balancers and volumes created by Kubernetes
-        run: |
-          cluster=$(terraform output -raw cluster_name 2> /dev/null || true)
-          if [ -n "$cluster" ] && aws eks describe-cluster --name "$cluster" > /dev/null 2>&1; then
-            aws eks update-kubeconfig --name "$cluster" --region "$AWS_REGION"
-            bash ../scripts/drain-cluster.sh "$cluster"
-          else
-            echo "No cluster, nothing to drain."
-          fi
-      - run: terraform destroy -auto-approve
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh

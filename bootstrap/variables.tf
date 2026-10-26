@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region for the state bucket (keep it equal to the infra region)."
   type        = string
-  default     = "eu-central-1"
+  default     = "eu-north-1"
 }
 
 variable "env" {
@@ -10,8 +10,13 @@ variable "env" {
   default     = "dev"
 }
 
-variable "github_repo" {
-  description = "owner/name of the repository whose workflows may assume the role."
+variable "budget_email" {
+  description = "Where budget alerts go (`make bootstrap` passes your git user.email)."
   type        = string
-  default     = "anddr13/voting-infra-aws"
+}
+
+variable "budget_limit_usd" {
+  description = "Monthly budget; alerts at 50% actual and 100% forecasted spend."
+  type        = string
+  default     = "10"
 }

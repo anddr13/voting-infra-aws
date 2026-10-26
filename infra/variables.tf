@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region."
   type        = string
-  default     = "eu-central-1"
+  default     = "eu-north-1"
 }
 
 variable "env" {
@@ -17,9 +17,9 @@ variable "kubernetes_version" {
 }
 
 variable "node_capacity_type" {
-  description = "SPOT is ~3x cheaper; nodes can be reclaimed, which is fine for a sandbox."
+  description = "SPOT is ~3x cheaper, but this account's organization SCP denies Spot launches, hence ON_DEMAND."
   type        = string
-  default     = "SPOT"
+  default     = "ON_DEMAND"
 
   validation {
     condition     = contains(["SPOT", "ON_DEMAND"], var.node_capacity_type)
@@ -28,9 +28,9 @@ variable "node_capacity_type" {
 }
 
 variable "node_instance_types" {
-  description = "Several 2 vCPU / 8 GiB types, so a spot shortage of one type does not block the node group."
+  description = "2 vCPU / 8 GiB types offered in eu-north-1; On-Demand uses the first, Spot would spread across all."
   type        = list(string)
-  default     = ["m6i.large", "m6a.large", "m5.large", "m5a.large", "m7i.large", "t3.large"]
+  default     = ["m6i.large", "m7i.large", "m5.large", "m7a.large"]
 }
 
 variable "node_count" {

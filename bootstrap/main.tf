@@ -1,8 +1,11 @@
-# One-time setup, run from a laptop with local state (see README):
+# One-time setup, run from a laptop with local state (`make bootstrap`, see README):
 #   - S3 bucket for the main stack's state (native S3 locking, no DynamoDB);
-#   - GitHub OIDC provider + IAM role, so GitHub Actions gets short-lived credentials
-#     and no AWS keys are stored in GitHub.
-# Costs ~$0 and is meant to stay; only infra/ is created and destroyed daily.
+#   - a monthly budget with e-mail alerts, the safety net for a stack that has no nightly destroy.
+# Costs ~$0 and is meant to stay; only infra/ is created and destroyed.
+#
+# Unlike the Azure and GCP stacks there is no GitHub OIDC trust here: this account lives in an
+# AWS-managed organization whose SCP denies iam:CreateOpenIDConnectProvider, so Terraform runs from
+# the laptop with short-lived `aws login` credentials instead of from GitHub Actions.
 
 terraform {
   required_version = ">= 1.10"
@@ -15,10 +18,6 @@ terraform {
     local = {
       source  = "hashicorp/local"
       version = "~> 2.9"
-    }
-    http = {
-      source  = "hashicorp/http"
-      version = "~> 3.6"
     }
   }
 }
@@ -59,52 +58,36 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-# --- GitHub Actions identity -------------------------------------------------------
+# --- Cost alerts -------------------------------------------------------------------
 
-# One per account. If it already exists: terraform import aws_iam_openid_connect_provider.github <arn>
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-}
+resource "aws_budgets_budget" "monthly" {
+  name         = "voting-sandbox"
+  budget_type  = "COST"
+  limit_amount = var.budget_limit_usd
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
 
-data "aws_iam_policy_document" "github_assume" {
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    # Only workflows running on main of this one repository (immutable subject, see github.tf).
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.github_subject]
-    }
+  # Forecast first: it fires while a forgotten cluster is still running, not after the money is spent.
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.budget_email]
   }
-}
 
-resource "aws_iam_role" "github" {
-  name               = "voting-infra-github"
-  assume_role_policy = data.aws_iam_policy_document.github_assume.json
-}
-
-# Broad on purpose for a sandbox account: the stack creates VPCs, IAM roles and EKS.
-# For anything real, scope this down to the services the stack uses.
-resource "aws_iam_role_policy_attachment" "github" {
-  role       = aws_iam_role.github.name
-  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 50
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.budget_email]
+  }
 }
 
 # --- Wiring for infra/ ---------------------------------------------------------------
 
+# Not committed (see .gitignore): it carries the account ID and only the laptop ever needs it.
 resource "local_file" "backend" {
   filename        = "${path.module}/../infra/backend.hcl"
   file_permission = "0644"
