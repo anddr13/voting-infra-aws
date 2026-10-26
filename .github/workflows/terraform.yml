@@ -12,8 +12,12 @@ on:
         options: [apply, destroy]
         default: apply
   schedule:
-    # Safety net for a pay-per-hour sandbox: whatever is still running at 01:00 UTC is destroyed.
-    - cron: "0 1 * * *"
+    # Safety net for a pay-per-hour sandbox: whatever is still running at night is destroyed.
+    # Off the top of the hour, because GitHub delays (and may drop) scheduled runs there: on 2026-10-26
+    # a "0 1 * * *" run started at 05:42. The second run catches a dropped or very late first one and
+    # finishes in about a minute when nothing is left.
+    - cron: "23 1 * * *"
+    - cron: "53 3 * * *"
 
 permissions:
   contents: read

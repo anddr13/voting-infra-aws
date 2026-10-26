@@ -42,7 +42,8 @@ terraform output -raw next_steps   # run the printed commands: repository variab
 GitHub → **Actions → terraform → Run workflow**:
 - `apply`: ~25 minutes (EKS ~12, nodes and add-ons ~5, Argo CD + Kafka ~8). The job waits until the app responds
   and writes its URL to the job summary.
-- `destroy`: removes everything. A nightly cron (01:00 UTC) runs it in case you forget.
+- `destroy`: removes everything. Two nightly crons (01:23 and 03:53 UTC) run it in case you forget; they avoid the top of the hour,
+  where GitHub delays scheduled runs (a 01:00 run once started at 05:42).
 
 The same from a laptop:
 
