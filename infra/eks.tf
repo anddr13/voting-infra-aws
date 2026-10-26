@@ -93,7 +93,9 @@ resource "aws_eks_node_group" "this" {
     max_unavailable = 1
   }
 
-  depends_on = [aws_iam_role_policy_attachment.node]
+  # Nodes need the internet route to reach the EKS endpoint and pull images: create them after it,
+  # and on destroy remove them before it (otherwise the internet gateway waits ~7 min for the nodes).
+  depends_on = [aws_iam_role_policy_attachment.node, aws_route_table_association.public]
 }
 
 # --- Add-ons -----------------------------------------------------------------

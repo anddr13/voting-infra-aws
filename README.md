@@ -45,7 +45,7 @@ with `AWS_PROFILE=...`.
 aws login --remote --profile gpu-lab      # the session behind the short-lived credentials
 
 make bootstrap   # once: S3 state bucket + budget alerts to your git e-mail; writes infra/backend.hcl (not committed)
-make up          # ~20 min; waits until the app answers and prints its URL
+make up          # ~18 min (measured 17 min 36 s, 9 of them EKS itself); waits until the app answers, prints its URL
 make down        # removes what Kubernetes created (NLB, EBS), then terraform destroy
 make leftovers   # EKS / EC2 / EBS / LB still in the region?
 ```
@@ -62,6 +62,39 @@ kubectl -n voting get kafka,kafkatopic,pods
 kubectl -n voting get scaledobject,hpa -w              # run the k6 test from voting-app in another terminal
 kubectl -n argocd port-forward svc/argocd-server 8443:443
 ```
+
+## Results (measured 2026-10-26)
+
+EKS 1.37 in eu-north-1, 2 × m6i.large On-Demand, worker `PROCESSING_DELAY_MS=20`. All six Argo CD applications
+came up Synced/Healthy on the first try, Kafka and MongoDB volumes bound on `gp3` through the EBS CSI driver.
+
+**Bring-up:** `make up` took **17 min 36 s**: EKS control plane 9 min 19 s, node group 1 min 46 s, add-ons ~1 min,
+Argo CD 1 min 9 s, then the app answered on the NLB within the first poll.
+
+**Load:** k6 on a laptop in Ukraine at 200 votes/s for 3 minutes through the NLB, each request from a different client id.
+
+| Time (UTC) | Worker replicas | Consumer lag |
+|---|---|---|
+| 13:28:25, start | 1 | 0 |
+| +26 s | 2 | 2,567 |
+| +53 s | **6** (max = partitions) | 5,185 (peak) |
+| +2 min | 6 | 3,725, **shrinking under load** |
+| end of load | 6 | 620 |
+| +17 s after the load | 6 | **0** |
+| +5 min | **1** (default HPA scale-down stabilisation) | 0 |
+
+- **36,000** requests at ~200/s, 100% answered `202`, 0 failed; p95 **78 ms**, median 71 ms (mostly the round trip
+  from the laptop to Stockholm).
+- **Exactly once:** MongoDB holds **36,004** votes = 36,000 from k6 + 4 manual ones; the tallies match the API
+  (cat 17,946 + dog 18,058). DLQ: 0 messages.
+- **The best of the three runs:** on m6i.large the six workers outpaced 200 votes/s, so the backlog shrank while the
+  load was still on. On AKS (D2as_v5) it levelled off at ~3,900, on kind it kept growing to 9,251.
+- Node CPU was not sampled: EKS ships without metrics-server, so `kubectl top` has nothing to read.
+
+**Tear-down:** `make down` took **13 min 26 s** (drain, then 22 resources destroyed: node group 8 min 21 s, EKS 2 min 28 s),
+and `make leftovers` found no EKS cluster, EC2 instance, EBS volume or load balancer. That run destroyed the route
+table before the nodes, so the internet gateway waited ~7 min for them; the node group now depends on the route
+table association, which also guarantees the route exists before nodes boot on `make up`.
 
 ## Pitfalls handled (and why)
 
