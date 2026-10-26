@@ -73,9 +73,9 @@ Argo CD 1 min 9 s, then the app answered on the NLB within the first poll.
 
 **Load:** k6 on a laptop in Ukraine at 200 votes/s for 3 minutes through the NLB, each request from a different client id.
 
-| Time (UTC) | Worker replicas | Consumer lag |
+| Time | Worker replicas | Consumer lag |
 |---|---|---|
-| 13:28:25, start | 1 | 0 |
+| start | 1 | 0 |
 | +26 s | 2 | 2,567 |
 | +53 s | **6** (max = partitions) | 5,185 (peak) |
 | +2 min | 6 | 3,725, **shrinking under load** |
